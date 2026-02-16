@@ -103,27 +103,55 @@ merge_base = true
 
 ## Integration Options
 
-### Option A: Minimal (Local Only)
+Helix already has `cargo xtask` for task automation. The recommended approach is to use `cargo rail plan` for change detection and let xtask handle execution.
 
-Use cargo-rail locally for explainability:
+### Recommended: `cargo rail plan` + xtask
+
+cargo-rail handles change detection. xtask handles execution. Clean separation.
+
+**Local development:**
 
 ```bash
 # Install
 cargo install cargo-rail
 
-# See what would run in CI
+# See what changed and which surfaces are enabled
 cargo rail plan --merge-base --explain
 
-# Preview exact commands
-cargo rail run --merge-base --dry-run --print-cmd
+# Get plan as JSON for scripting
+PLAN=$(cargo rail plan --merge-base -f json)
 
-# Use a specific profile
+# Check if test surface is enabled
+if echo "$PLAN" | jq -e '.surfaces.test.enabled' > /dev/null; then
+  cargo xtask test
+fi
+
+# Check custom surfaces
+THEMES=$(echo "$PLAN" | jq -r '.surfaces["custom:themes"].enabled')
+if [ "$THEMES" = "true" ]; then
+  cargo xtask theme-check
+fi
+```
+
+**Why this approach?**
+
+1. **cargo-rail stays focused**: Change detection only - which crates changed, which surfaces matter
+2. **xtask stays authoritative**: Your existing task definitions don't change
+3. **Composable**: CI consumes plan output, xtask runs the actual commands
+4. **No lock-in**: If you stop using cargo-rail, xtask still works
+
+### Alternative: `cargo rail run` (simpler, less flexible)
+
+If you prefer a single command, `cargo rail run` wraps plan + execution:
+
+```bash
+cargo rail run --merge-base --surface test
 cargo rail run --workflow docs --dry-run --print-cmd
 ```
 
-No CI changes. Developers get visibility into CI behavior.
+This uses cargo-rail's built-in executors (`cargo test`, `cargo check`, etc.) rather than xtask.
 
-### Option B: Full CI Integration with GitHub Action
+### Full CI Integration with GitHub Action
 
 Modify `build.yml` to use cargo-rail-action. **The action automatically renders a step summary** showing what changed and why in the GitHub UI.
 
@@ -354,14 +382,19 @@ The config defines custom surfaces for Helix's runtime assets:
 # See what changed and why
 cargo rail plan --merge-base --explain
 
-# Use a specific profile
-cargo rail run --workflow docs --dry-run --print-cmd
+# Get plan as JSON
+PLAN=$(cargo rail plan --merge-base -f json)
 
-# Run tests for affected crates
-cargo rail run --merge-base --surface test
+# Extract affected crates
+echo "$PLAN" | jq '.impact'
 
-# Force full workspace
-cargo rail run --all --surface test
+# Check which surfaces are enabled
+echo "$PLAN" | jq '.surfaces | to_entries | map(select(.value.enabled)) | from_entries'
+
+# Run xtask commands based on plan output
+if echo "$PLAN" | jq -e '.surfaces["custom:queries"].enabled' > /dev/null; then
+  cargo xtask query-check
+fi
 
 # Validate configuration
 cargo rail config validate --strict
@@ -372,10 +405,11 @@ cargo rail config validate --strict
 | Command | What It Does |
 |---------|--------------|
 | `cargo rail plan --merge-base --explain` | Show what changed and why |
-| `cargo rail run --workflow docs` | Run the docs profile |
-| `cargo rail run --merge-base --surface test` | Run tests for affected crates |
-| `cargo rail run --merge-base --dry-run --print-cmd` | Preview commands without running |
+| `cargo rail plan --merge-base -f json` | Get plan as JSON for scripting |
+| `cargo rail plan --merge-base -f github` | Get plan as GitHub Actions outputs |
 | `cargo rail config validate --strict` | Validate rail.toml configuration |
+| `cargo xtask query-check` | Validate queries (run when custom:queries enabled) |
+| `cargo xtask theme-check` | Validate themes (run when custom:themes enabled) |
 
 ## Expected Impact
 
