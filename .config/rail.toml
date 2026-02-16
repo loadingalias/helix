@@ -22,11 +22,11 @@ transitive_host = "root"  # only used if pin_transitives = true
 
 strict_version_compat = true
 exact_pin_handling = "warn"
-major_version_conflict = "warn"  # warn = skip, bump = force highest
+major_version_conflict = "bump"  # warn = skip, bump = force highest
 
 msrv = true
-msrv_source = "max"  # deps | workspace | max
-enforce_msrv_inheritance = false  # Ensure members inherit workspace rust-version
+msrv_source = "deps"  # compute from dependency graph
+enforce_msrv_inheritance = false
 
 detect_unused = true
 remove_unused = true  # requires detect_unused = true
@@ -46,7 +46,7 @@ skip_undeclared_patterns = [
 exclude = []
 include = []
 max_backups = 3
-sort_dependencies = true  # false to preserve existing order
+sort_dependencies = false  # preserve upstream order for PR acceptance
 
 
 [release]
@@ -64,45 +64,68 @@ require_changelog_entries = false
 
 [change-detection]
 # Paths that trigger full workspace rebuild
+# Note: languages.toml affects grammar cache, correctly triggers infra
 infrastructure = [
   ".github/**",
-  "scripts/**",
-  "justfile",
-  "Justfile",
-  "Makefile",
-  "makefile",
-  "GNUmakefile",
-  "*.sh",
-  "Taskfile.yml",
-  "Taskfile.yaml",
-  ".pre-commit-config.yaml",
-  "deny.toml",
-  "cliff.toml",
-  "release.toml",
-  "release-plz.toml",
+  "flake.nix",
+  "flake.lock",
+  "default.nix",
+  "shell.nix",
+  "rust-toolchain.toml",
+  "languages.toml",  # Grammar definitions - affects tree-sitter cache
 ]
 conservative_unclassified_owner_fallback = true
 confidence_profile = "balanced"
-bot_pr_confidence_profile = "strict"  # optional bot PR override
+bot_pr_confidence_profile = "strict"
+
+# Custom surfaces for helix's runtime assets
+[change-detection.custom]
+# Themes: color schemes that don't need build/test
+themes = ["runtime/themes/**"]
+# Queries: tree-sitter queries that need validation but not full rebuild
+queries = ["runtime/queries/**"]
+# Book: documentation that needs mdbook build
+book = ["book/**"]
+# Xtask: build tooling
+xtask = ["xtask/**"]
 
 
 [run]
 default_profile = "local"
 
-# Optional workflow -> profile mapping:
-# [run.workflow]
-# commit = "ci"
-# nightly = "nightly"
+# Map workflow names to profiles (from build.yml jobs)
+[run.workflow]
+build = "ci"      # check, test, lints jobs
+check = "msrv"    # MSRV check job
+test = "test"     # test suite job
+lints = "lint"    # lints job (fmt, clippy, doc)
+docs = "docs"     # docs job (query-check, theme-check, docgen)
 
-# Optional user-defined run profiles:
-# [run.profile.ci]
-# surfaces = ["build", "test"]
-# merge_base = true
+# Main CI profile - build and test
+[run.profile.ci]
+surfaces = ["build", "test"]
+merge_base = true
 
-# [run.profile.docs_custom]
-# surfaces = ["docs"]
-# run_args = ["--workspace", "{cargo_args}"]
-# since = "{base_ref}"
+# MSRV check - build only
+[run.profile.msrv]
+surfaces = ["build"]
+merge_base = true
+
+# Test suite - test surface
+[run.profile.test]
+surfaces = ["test"]
+merge_base = true
+
+# Lint profile - build surface (clippy needs build)
+[run.profile.lint]
+surfaces = ["build"]
+merge_base = true
+
+# Docs profile - for documentation changes
+# Note: custom:themes and custom:queries are plan OUTPUTS, used in CI gating
+[run.profile.docs]
+surfaces = ["docs"]
+merge_base = true
 
 
 # Per-crate configuration: run 'cargo rail split init <crate>' to generate
